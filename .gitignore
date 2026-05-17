@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Django
+*.log
+db.sqlite3
+media/
+staticfiles/
+/static/
+
+# Entorno - NO VERSIONAR DATOS SENSIBLES
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Dependencias
+node_modules/
+package-lock.json
+.npm
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Otros
+.DS_Store
+Thumbs.db
+*.egg
+.cache/
