@@ -10,7 +10,5 @@ urlpatterns = [
     path('api/clan/', include('users.urls_clan')),
     path('api/players/', include('players.urls')),
     path('api/wars/', include('wars.urls')),
-
-    # Los siguientes se agregarán en cada fase:
-    # path('api/stats/', include('stats.urls')),          # FASE 5
+    path('api/stats/', include('stats.urls')),     
 ]
