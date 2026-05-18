@@ -2,6 +2,7 @@ import logging
 import hashlib
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from django.db.models import Count, Q
 from users.models import Clan
 from players.models import Player
 from wars.models import War, WarParticipant, Attack, Defense
@@ -23,7 +24,8 @@ class SyncWarsService:
     1. Obtiene historial de guerras desde la API (/warlog)
     2. Por cada guerra, verifica si ya existe en BD
     3. Si no existe, la crea con sus datos generales
-    4. Evita duplicados automáticamente
+    4. Actualiza contadores del clan (war_wins, war_losses, war_ties)
+    5. Evita duplicados automáticamente
     """
 
     def __init__(self, clan: Clan):
@@ -38,12 +40,6 @@ class SyncWarsService:
     def sync(self, limit: int = 20) -> dict:
         """
         Ejecuta la sincronización del historial de guerras.
-
-        Args:
-            limit: Número máximo de guerras a obtener (default 20)
-
-        Returns:
-            Diccionario con el resultado
         """
         logger.info(f"Iniciando sync de guerras para: {self.clan.clan_name}")
 
@@ -79,6 +75,9 @@ class SyncWarsService:
                 logger.error(error_msg)
                 self.errors.append(error_msg)
 
+        # ===== PASO 3: Actualizar contadores del clan =====
+        self._update_clan_war_counters()
+
         # ===== RESULTADO FINAL =====
         result = {
             'success': True,
@@ -93,16 +92,69 @@ class SyncWarsService:
         logger.info(f"Sync de guerras completado: {result}")
         return result
 
+    def _update_clan_war_counters(self):
+        """
+        Recalcula y actualiza war_wins, war_losses, war_ties en el modelo Clan
+        basándose en las guerras terminadas almacenadas en la BD.
+        """
+        try:
+            # Contar resultados desde las guerras en BD (solo guerras terminadas)
+            wars_finished = War.objects.filter(
+                clan=self.clan,
+                state='warEnded',
+                result__isnull=False
+            )
+
+            wins   = wars_finished.filter(result='win').count()
+            losses = wars_finished.filter(result='loss').count()
+            ties   = wars_finished.filter(result='tie').count()
+
+            # Calcular racha de victorias actual (guerras consecutivas más recientes)
+            win_streak = self._calculate_win_streak()
+
+            # Actualizar el clan
+            self.clan.war_wins = wins
+            self.clan.war_losses = losses
+            self.clan.war_ties = ties
+            self.clan.war_win_streak = win_streak
+            self.clan.save(update_fields=['war_wins', 'war_losses', 'war_ties', 'war_win_streak', 'updated_at'])
+
+            logger.info(
+                f"Contadores actualizados → "
+                f"V:{wins} D:{losses} E:{ties} Racha:{win_streak}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error actualizando contadores del clan: {e}")
+            self.errors.append(f"Error actualizando contadores: {str(e)}")
+
+    def _calculate_win_streak(self) -> int:
+        """
+        Calcula la racha de victorias consecutivas más reciente.
+        Recorre las guerras terminadas de más reciente a más antigua.
+        """
+        try:
+            recent_wars = War.objects.filter(
+                clan=self.clan,
+                state='warEnded',
+                result__isnull=False
+            ).order_by('-end_time').values_list('result', flat=True)
+
+            streak = 0
+            for result in recent_wars:
+                if result == 'win':
+                    streak += 1
+                else:
+                    break  # Se rompió la racha
+
+            return streak
+        except Exception:
+            return 0
+
     def _generate_war_id(self, war_data: dict) -> str:
         """
         Genera un ID único para la guerra basado en sus datos.
         La API de warlog NO provee un ID único, así que lo generamos.
-
-        Args:
-            war_data: Datos de la guerra desde la API
-
-        Returns:
-            String con el ID único generado
         """
         clan_tag = self.clan.clan_tag
         end_time = war_data.get('endTime', '')
@@ -116,17 +168,10 @@ class SyncWarsService:
         """
         Convierte el formato de fecha de Clash (20260515T013333.000Z)
         al formato de Django.
-
-        Args:
-            datetime_str: Fecha en formato Clash
-
-        Returns:
-            Objeto datetime o None
         """
         if not datetime_str:
             return None
         try:
-            # Convertir formato Clash a ISO: 20260515T013333.000Z → 2026-05-15T01:33:33Z
             formatted = (
                 f"{datetime_str[:4]}-{datetime_str[4:6]}-{datetime_str[6:8]}"
                 f"T{datetime_str[9:11]}:{datetime_str[11:13]}:{datetime_str[13:15]}Z"
@@ -151,7 +196,6 @@ class SyncWarsService:
             self.errors.append(f"Fecha inválida: {war_data.get('endTime')}")
             return
 
-        # ===== DETECTAR SI ES GUERRA DE LIGA =====
         opponent_tag = opponent_data.get('tag', '')
         opponent_name = opponent_data.get('name', '')
         is_league = not opponent_tag or not opponent_name
@@ -164,7 +208,6 @@ class SyncWarsService:
             clan_tag=clan_data.get('tag', self.clan.clan_tag),
             clan_name=clan_data.get('name', self.clan.clan_name),
 
-            # Si es liga, marcar claramente
             opponent_tag=opponent_tag if opponent_tag else 'CWL',
             opponent_name=opponent_name if opponent_name else 'Liga de Guerra (CWL)',
             opponent_clan_level=opponent_data.get('clanLevel', 0),
@@ -186,17 +229,12 @@ class SyncWarsService:
             opponent_destruction_percentage=opponent_data.get('destructionPercentage', 0.0),
 
             result=self._parse_result(war_data.get('result')),
-
-            # ===== FLAG DE LIGA =====
             is_league_war=is_league,
         )
 
         self.created += 1
+
     def _parse_result(self, result: str) -> str:
-        """
-        Traduce el resultado de la API al formato del modelo.
-        API usa 'lose', modelo usa 'loss'.
-        """
         mapping = {
             'win': 'win',
             'lose': 'loss',
@@ -204,32 +242,102 @@ class SyncWarsService:
         }
         return mapping.get(result, None)
 
+
 # =====================================================
-# FUNCIÓN HELPER
+# SERVICIO: Fix de contadores (para corregir datos existentes)
+# =====================================================
+
+class FixClanWarCountersService:
+    """
+    Servicio para recalcular y corregir los contadores de guerra
+    de un clan usando los datos ya almacenados en la BD.
+
+    Usar cuando los contadores están en 0 pero las guerras existen.
+    """
+
+    def __init__(self, clan: Clan):
+        self.clan = clan
+
+    def fix(self) -> dict:
+        try:
+            wars_finished = War.objects.filter(
+                clan=self.clan,
+                state='warEnded',
+                result__isnull=False
+            )
+
+            wins   = wars_finished.filter(result='win').count()
+            losses = wars_finished.filter(result='loss').count()
+            ties   = wars_finished.filter(result='tie').count()
+            total  = wins + losses + ties
+
+            # Calcular racha
+            streak = 0
+            recent = wars_finished.order_by('-end_time').values_list('result', flat=True)
+            for r in recent:
+                if r == 'win':
+                    streak += 1
+                else:
+                    break
+
+            win_rate = round((wins / total) * 100, 1) if total > 0 else 0.0
+
+            self.clan.war_wins = wins
+            self.clan.war_losses = losses
+            self.clan.war_ties = ties
+            self.clan.war_win_streak = streak
+            self.clan.save(update_fields=[
+                'war_wins', 'war_losses', 'war_ties',
+                'war_win_streak', 'updated_at'
+            ])
+
+            logger.info(f"Fix contadores {self.clan.clan_name}: V:{wins} D:{losses} E:{ties} Racha:{streak}")
+
+            return {
+                'success': True,
+                'clan': self.clan.clan_name,
+                'wins': wins,
+                'losses': losses,
+                'ties': ties,
+                'total': total,
+                'win_rate': win_rate,
+                'win_streak': streak,
+            }
+
+        except Exception as e:
+            logger.error(f"Error en fix de contadores: {e}")
+            return {'success': False, 'error': str(e)}
+
+
+# =====================================================
+# FUNCIONES HELPER
 # =====================================================
 
 def sync_clan_wars(clan_id: int, limit: int = 20) -> dict:
     """
-    Función helper para sincronizar guerras de un clan por ID.
-
-    Args:
-        clan_id: ID del clan en la BD
-        limit: Número máximo de guerras a sincronizar
-
-    Returns:
-        Diccionario con el resultado
-
-    Ejemplo de uso:
-        result = sync_clan_wars(1, limit=20)
-        print(result)
+    Sincroniza guerras de un clan por ID.
     """
     try:
         clan = Clan.objects.get(id=clan_id)
     except Clan.DoesNotExist:
-        return {
-            'success': False,
-            'error': f'Clan con ID {clan_id} no encontrado en la BD'
-        }
+        return {'success': False, 'error': f'Clan con ID {clan_id} no encontrado'}
 
     service = SyncWarsService(clan)
     return service.sync(limit=limit)
+
+
+def fix_clan_war_counters(clan_id: int) -> dict:
+    """
+    Corrige los contadores de guerra de un clan usando datos existentes en BD.
+
+    Usar en Django shell:
+        from core_data.services.sync_wars import fix_clan_war_counters
+        fix_clan_war_counters(1)
+    """
+    try:
+        clan = Clan.objects.get(id=clan_id)
+    except Clan.DoesNotExist:
+        return {'success': False, 'error': f'Clan con ID {clan_id} no encontrado'}
+
+    service = FixClanWarCountersService(clan)
+    return service.fix()
