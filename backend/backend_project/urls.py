@@ -8,9 +8,9 @@ urlpatterns = [
     # ===== API v1 =====
     path('api/auth/', include('users.urls')),
     path('api/clan/', include('users.urls_clan')),
+    path('api/players/', include('players.urls')),
+    path('api/wars/', include('wars.urls')),
 
     # Los siguientes se agregarán en cada fase:
-    # path('api/players/', include('players.urls')),     # FASE 3
-    # path('api/wars/', include('wars.urls')),            # FASE 4
     # path('api/stats/', include('stats.urls')),          # FASE 5
 ]
