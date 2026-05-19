@@ -1,0 +1,83 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --sidebar-width: 240px;
+    --topbar-height: 60px;
+  }
+
+  * {
+    @apply border-clan-border;
+  }
+
+  body {
+    @apply bg-clan-dark text-white font-sans antialiased;
+    min-height: 100dvh;
+  }
+
+  /* Scrollbar custom */
+  ::-webkit-scrollbar       { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-clan-border rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-clan-surface; }
+}
+
+@layer components {
+  /* Glassmorphism base */
+  .glass {
+    @apply backdrop-blur-md border border-white/10;
+    background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%);
+  }
+
+  .glass-sm {
+    @apply backdrop-blur-sm border border-white/10;
+    background: rgba(255,255,255,0.04);
+  }
+
+  /* Card base */
+  .card {
+    @apply glass rounded-xl p-4;
+  }
+
+  .card-sm {
+    @apply glass-sm rounded-lg p-3;
+  }
+
+  /* Clan gold accent */
+  .text-gold    { @apply text-clan-gold; }
+  .border-gold  { @apply border-clan-gold/40; }
+  .bg-gold      { @apply bg-clan-gold; }
+
+  /* Page wrapper */
+  .page-content {
+    @apply p-6 space-y-6;
+  }
+
+  /* Stat badge */
+  .stat-badge {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium;
+  }
+}
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+
+  /* Light mode overrides */
+  html:not(.dark) body {
+    @apply bg-gray-50 text-gray-900;
+  }
+
+  html:not(.dark) .glass {
+    background: rgba(255,255,255,0.7);
+    @apply border-gray-200/80;
+  }
+
+  html:not(.dark) .glass-sm {
+    background: rgba(255,255,255,0.5);
+    @apply border-gray-200/60;
+  }
+}
