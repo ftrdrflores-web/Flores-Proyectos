@@ -128,14 +128,34 @@ class RegisterSerializer(serializers.ModelSerializer):
             })
 
         return attrs
-
+    
     def create(self, validated_data):
-        # Extraer campos del perfil
+
         clan = validated_data.pop('clan')
         player_tag = validated_data.pop('player_tag', None)
         validated_data.pop('password_confirm')
 
-        # Crear el usuario
+        # Normalizar player_tag
+        if player_tag:
+            player_tag = player_tag.upper()
+            if not player_tag.startswith('#'):
+                player_tag = f'#{player_tag}'
+
+        # Determinar rol automáticamente desde el Player en BD
+        role = 'member'
+        if player_tag:
+            try:
+                from players.models import Player
+                player = Player.objects.get(clan=clan, player_tag=player_tag)
+                if player.role in ['leader', 'coLeader']:
+                    role = 'admin'
+            except Player.DoesNotExist:
+                pass
+
+        # Si es el primer usuario del clan → admin forzado
+        if not UserProfile.objects.filter(clan=clan).exists():
+            role = 'admin'
+
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
@@ -144,18 +164,16 @@ class RegisterSerializer(serializers.ModelSerializer):
             password=validated_data['password'],
         )
 
-        # Crear el perfil vinculado al clan
-        # Por defecto: rol 'member', el admin del clan puede cambiarlo después
+        
         UserProfile.objects.create(
             user=user,
             clan=clan,
-            role='member',
+            role=role,
             player_tag=player_tag or None,
         )
 
         return user
-
-
+    
 # =====================================================
 # SERIALIZER: Perfil de usuario (lectura y actualización)
 # =====================================================
