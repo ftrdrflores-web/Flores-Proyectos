@@ -1,5 +1,4 @@
 import { RouterProvider } from 'react-router-dom'
-import { Toaster } from 'sileo'
 import { useEffect } from 'react'
 import router from './router'
 import useThemeStore from '@store/themeStore'
@@ -11,12 +10,7 @@ const App = () => {
     initTheme()
   }, [initTheme])
 
-  return (
-    <>
-      <RouterProvider router={router} />
-      <Toaster position="top-right" />
-    </>
-  )
+  return <RouterProvider router={router} />
 }
 
 export default App
